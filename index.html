@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SonaLens</title>
+<style>
+:root{--g:conic-gradient(from 0deg,#0f4ff0,#1a8ae8,#17b8e0,#1ccdc8,#17b8e0,#1a8ae8,#0f4ff0)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
+html,body{height:100%;background:#070b14;font-family:"Google Sans","Product Sans",-apple-system,"Segoe UI",Roboto,Arial,sans-serif;overflow:hidden}
+.app{position:relative;width:100%;max-width:460px;height:100dvh;margin:0 auto;overflow:hidden;font-size:min(3.55vw,16.3px);color:#fff;background:#0b1020}
+button{border:0;background:none;font:inherit;color:inherit;cursor:pointer}
+svg{display:block;flex:none}
+
+/* фон без камеры: плывущие переливы */
+.bg{position:absolute;inset:-20%;will-change:transform;
+  background:radial-gradient(45% 32% at 22% 22%,#0f4ff0aa,transparent),radial-gradient(38% 30% at 82% 38%,#1a8ae8aa,transparent),
+  radial-gradient(42% 32% at 28% 80%,#17b8e0aa,transparent),radial-gradient(38% 30% at 85% 85%,#1ccdc8aa,transparent);animation:drift 14s ease-in-out infinite alternate}
+@keyframes drift{to{transform:translate(4%,-3%) rotate(8deg) scale(1.08)}}
+#video,#still,#picked{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none}
+.scrim{position:absolute;inset:0;pointer-events:none;background:linear-gradient(rgba(5,8,16,.45),transparent 22%,transparent 55%,rgba(5,8,16,.78))}
+
+.glass{background:rgba(20,26,42,.42);border:1px solid rgba(255,255,255,.18);-webkit-backdrop-filter:blur(18px) saturate(1.5);backdrop-filter:blur(18px) saturate(1.5)}
+.round{display:grid;place-items:center;border-radius:50%}
+.round svg{width:1.6em;height:1.6em}
+
+.top{position:absolute;left:0;right:0;top:calc(env(safe-area-inset-top,0px) + 1.4em);padding:0 1em;display:flex;justify-content:flex-end;gap:.7em}
+.top .round{width:3em;height:3em}
+#flash.on{background:#fff;color:#111}
+
+/* рамка с переливающимися углами */
+.stage{position:absolute;left:0;right:0;top:calc(env(safe-area-inset-top,0px) + 6em);bottom:20.5em;display:grid;place-items:center}
+.frame{height:min(100%,16em);aspect-ratio:1;max-width:62%;filter:drop-shadow(0 0 .5em rgba(40,160,240,.5))}
+.frame svg{width:100%;height:100%;overflow:visible}
+.frame.scan{animation:pulse .7s ease-in-out 2}
+@keyframes pulse{50%{transform:scale(.92)}}
+
+/* подсказка с бегущим градиентом */
+
+/* режимы */
+.modes{position:absolute;left:50%;bottom:11.6em;transform:translateX(-50%);display:flex;padding:.3em;border-radius:2em;gap:.1em}
+.mode{padding:.55em 1.1em;border-radius:2em;font-size:.88em;font-weight:500;color:rgba(255,255,255,.8);white-space:nowrap;transition:background .35s ease,color .35s ease,box-shadow .35s ease}
+.mode.active{background:#fff;color:#12182b;box-shadow:0 0 1.2em rgba(40,170,240,.6)}
+
+/* нижний ряд */
+.bar{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0px) + 2em);display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 11%}
+.bar .round{width:3.4em;height:3.4em}
+.bar .round svg{width:1.7em;height:1.7em}
+.shutter{position:relative;width:4.4em;height:4.4em;border-radius:50%;display:grid;place-items:center;background:#fff;
+  transition:transform .25s cubic-bezier(.2,.8,.2,1)}
+.shutter::before{content:"";position:absolute;inset:-.4em;border-radius:50%;opacity:0;background:var(--g);
+  -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - .12em),#000 calc(100% - .12em));mask:radial-gradient(farthest-side,transparent calc(100% - .12em),#000 calc(100% - .12em));transition:opacity .3s}
+.shutter b{display:grid;place-items:center}
+.shutter svg{width:1.9em;height:1.9em}
+.shutter:active{transform:scale(.92)}
+.shutter.busy::before{opacity:1;animation:spin 1.2s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* волна сканирования */
+.sweep{position:absolute;inset:0;pointer-events:none;opacity:0;mix-blend-mode:screen;
+  background:linear-gradient(105deg,transparent 25%,rgba(15,79,240,.5) 40%,rgba(23,184,224,.5) 52%,rgba(28,205,200,.5) 62%,transparent 78%);transform:translateX(-100%)}
+.sweep.go{animation:sw 1.4s ease-in-out}
+@keyframes sw{0%{opacity:1;transform:translateX(-100%)}100%{opacity:1;transform:translateX(100%)}}
+
+.toast{position:absolute;left:50%;top:calc(env(safe-area-inset-top,0px) + 5em);transform:translate(-50%,-8px);padding:.6em 1.2em;border-radius:1.4em;font-size:.92em;opacity:0;pointer-events:none;transition:.3s;text-align:center;max-width:88%}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.sheet{position:absolute;left:3%;right:3%;bottom:calc(env(safe-area-inset-bottom,0px) + .8em);max-height:62%;display:flex;flex-direction:column;border-radius:1.6em;
+  background:rgba(8,14,30,.97);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);transform:translateY(115%);transition:transform .45s cubic-bezier(.2,.8,.2,1);z-index:5}
+.sheet.open{transform:none}
+.sbody{overflow:auto;padding:1.1em 1.2em .4em;-webkit-overflow-scrolling:touch}
+.sbody .lang{font-size:.75em;color:#7fd8ee;margin-bottom:.7em}
+.sbody .src{font-size:.78em;color:rgba(255,255,255,.55);line-height:1.4}
+.sbody .dst{font-size:1.05em;line-height:1.4;margin:.2em 0 1em}
+.sact{display:flex;gap:.6em;padding:.6em 1em 1em}
+.sact button{flex:1;padding:.75em;border-radius:2em;font-size:.9em;font-weight:500;border:1px solid rgba(255,255,255,.2)}
+.sact #done{background:#fff;color:#12182b;border-color:#fff}
+input[type=file]{display:none}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important}}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+</head>
+<body>
+<div class="app">
+  <div class="bg"></div>
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="still"></canvas>
+  <img id="picked" alt="">
+  <div class="scrim"></div>
+  <div class="sweep" id="sweep"></div>
+
+  <div class="top">
+    <button class="round glass" id="flash" aria-label="Вспышка">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 2h10l-3.5 7H18l-8 13 1.5-9H7z"/><path d="M3 3l18 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+
+  <div class="stage"><div class="frame" id="frame">
+    <svg viewBox="0 0 100 100" fill="none" stroke-width="3.2" stroke-linecap="round">
+      <defs><linearGradient id="gr" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="100" y2="100"><stop offset="0" stop-color="#0f4ff0"/><stop offset=".5" stop-color="#17b8e0"/><stop offset="1" stop-color="#1ccdc8"/></linearGradient></defs>
+      <g stroke="url(#gr)"><path d="M4 28V16a12 12 0 0 1 12-12h12"/><path d="M72 4h12a12 12 0 0 1 12 12v12"/><path d="M96 72v12a12 12 0 0 1-12 12H72"/><path d="M28 96H16A12 12 0 0 1 4 84V72"/></g>
+    </svg></div></div>
+
+  <div class="modes glass" id="modes">
+    <button class="mode active">Перевод</button>
+    <button class="mode">Найти по фото</button>
+  </div>
+
+  <div class="bar">
+    <button class="round glass" id="gallery" aria-label="Галерея">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"><rect x="3" y="3.5" width="18" height="17" rx="3"/><circle cx="8.5" cy="9" r="1.5"/><path d="M3.5 18l5-5 4 4 3-3 5 5"/></svg>
+    </button>
+    <button class="shutter" id="shutter" aria-label="Искать">
+      <b><svg viewBox="0 0 24 24" fill="none" stroke-width="2.3" stroke-linecap="round"><defs><linearGradient id="ig" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0f4ff0"/><stop offset="1" stop-color="#1ccdc8"/></linearGradient></defs><g stroke="url(#ig)"><circle cx="10.6" cy="10.6" r="6.2"/><path d="M15.3 15.3l4.3 4.3"/></g></svg></b>
+    </button>
+    <span></span>
+  </div>
+  <div class="sheet" id="sheet"><div class="sbody" id="sbody"></div>
+    <div class="sact"><button id="copy">Копировать</button><button id="done">Готово</button></div></div>
+  <div class="toast glass" id="toast"></div>
+  <input type="file" id="file" accept="image/*">
+</div>
+
+<script>
+(function(){
+  var $=function(i){return document.getElementById(i)};
+  var video=$('video'),still=$('still'),picked=$('picked'),toast=$('toast');
+  var stream=null,track=null,torch=false,mode='Перевод',tt;
+  function say(t){toast.textContent=t;toast.classList.add('show');clearTimeout(tt);tt=setTimeout(function(){toast.classList.remove('show')},1800)}
+
+  function start(){
+    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){say('Камера недоступна. Откройте страницу по https');return}
+    navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false})
+      .then(function(s){stream=s;track=s.getVideoTracks()[0];video.srcObject=s;video.style.display='block';picked.style.display='none';still.style.display='none'})
+      .catch(function(){say('Разрешите доступ к камере в настройках браузера')});
+  }
+
+  document.querySelectorAll('.mode').forEach(function(b){
+    b.addEventListener('click',function(){
+      document.querySelectorAll('.mode').forEach(function(x){x.classList.remove('active')});
+      b.classList.add('active');mode=b.textContent;
+    });
+  });
+
+  $('flash').addEventListener('click',function(){
+    torch=!torch;this.classList.toggle('on',torch);
+    var c=track&&track.getCapabilities&&track.getCapabilities();
+    if(c&&c.torch){track.applyConstraints({advanced:[{torch:torch}]}).catch(function(){})}else say('Вспышка не поддерживается');
+  });
+
+  var working=false,lastText='';
+  function cnt(t,re){return (t.match(re)||[]).length}
+  function decode(t){var e=document.createElement('textarea');e.innerHTML=t;return e.value}
+  function chunks(t){
+    var parts=t.split(/(?<=[.!?…])\s+/),out=[],cur='';
+    parts.forEach(function(p){
+      while(p.length>450){var cut=p.lastIndexOf(' ',450);if(cut<1)cut=450;if(cur){out.push(cur);cur=''}out.push(p.slice(0,cut));p=p.slice(cut).trim()}
+      if((cur+' '+p).length>450){out.push(cur);cur=p}else cur=cur?cur+' '+p:p;
+    });
+    if(cur)out.push(cur);return out;
+  }
+  function tr(chunk,dir){
+    return fetch('https://api.mymemory.translated.net/get?q='+encodeURIComponent(chunk)+'&langpair='+dir)
+      .then(function(r){return r.json()})
+      .then(function(j){if(+j.responseStatus!==200)throw new Error(j.responseDetails||'translate');return decode(j.responseData.translatedText)});
+  }
+  function translateText(text,dir){
+    var cs=chunks(text),res=[];
+    return cs.reduce(function(p,c){return p.then(function(){return tr(c,dir).then(function(x){res.push(x)})})},Promise.resolve()).then(function(){return res.join(' ')});
+  }
+  function esc(t){return t.replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c]})}
+  function showSheet(items){
+    var html='';var out=[];
+    items.forEach(function(it){
+      html+='<div class="lang">'+(it.dir==='en|ru'?'Английский → Русский':'Русский → Английский')+'</div><div class="src">'+esc(it.src)+'</div><div class="dst">'+esc(it.dst)+'</div>';
+      out.push(it.dst);
+    });
+    lastText=out.join('\n\n');$('sbody').innerHTML=html;$('sheet').classList.add('open');
+  }
+  function closeSheet(){$('sheet').classList.remove('open');if(picked.style.display!=='block')still.style.display='none'}
+  $('done').addEventListener('click',closeSheet);
+  $('copy').addEventListener('click',function(){
+    if(navigator.clipboard)navigator.clipboard.writeText(lastText).then(function(){say('Скопировано')},function(){say('Не удалось скопировать')});
+  });
+
+  $('shutter').addEventListener('click',function(){
+    if(working)return;
+    var src=picked.style.display==='block'?picked:(stream&&video.videoWidth?video:null);
+    if(!src){say('Нет изображения. Включите камеру или выберите фото');return}
+    if(mode!=='Перевод'){say('Этот режим пока не подключён');return}
+    if(!window.Tesseract){say('Не загрузилась библиотека распознавания. Нужен интернет');return}
+    working=true;
+    var sw=$('sweep'),fr=$('frame'),sh=$('shutter');
+    sw.classList.remove('go');void sw.offsetWidth;sw.classList.add('go');fr.classList.add('scan');sh.classList.add('busy');
+    var w=src===video?video.videoWidth:src.naturalWidth,h=src===video?video.videoHeight:src.naturalHeight,k=Math.min(1,1800/Math.max(w,h));
+    still.width=Math.round(w*k);still.height=Math.round(h*k);
+    still.getContext('2d').drawImage(src,0,0,still.width,still.height);
+    if(src===video)still.style.display='block';
+    say('Распознаю текст…');
+    Tesseract.recognize(still,'rus+eng',{logger:function(m){if(m.status==='recognizing text')say('Распознаю текст… '+Math.round(m.progress*100)+'%')}})
+      .then(function(r){
+        var paras=r.data.text.split(/\n\s*\n/).map(function(p){return p.replace(/\s*\n\s*/g,' ').trim()}).filter(function(p){return cnt(p,/[A-Za-zА-Яа-яЁё]/g)>=2});
+        if(!paras.length)throw new Error('empty');
+        say('Перевожу…');
+        var items=[];
+        return paras.reduce(function(p,t){
+          return p.then(function(){
+            var dir=cnt(t,/[А-Яа-яЁё]/g)>cnt(t,/[A-Za-z]/g)?'ru|en':'en|ru';
+            return translateText(t,dir).then(function(d){items.push({src:t,dst:d,dir:dir})});
+          });
+        },Promise.resolve()).then(function(){showSheet(items)});
+      })
+      .catch(function(e){say(e&&e.message==='empty'?'Текст не найден. Наведите ближе':'Не удалось перевести. Проверьте интернет')})
+      .then(function(){working=false;sh.classList.remove('busy');fr.classList.remove('scan');if(!$('sheet').classList.contains('open')&&picked.style.display!=='block')still.style.display='none'});
+  });
+
+  $('gallery').addEventListener('click',function(){$('file').click()});
+  $('file').addEventListener('change',function(){
+    var f=this.files&&this.files[0];if(!f)return;
+    picked.src=URL.createObjectURL(f);picked.style.display='block';still.style.display='none';say('Фото выбрано');
+  });
+  start();
+})();
+</script>
+</body>
+</html>
